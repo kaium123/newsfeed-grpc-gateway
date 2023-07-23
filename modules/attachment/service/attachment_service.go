@@ -2,74 +2,54 @@ package service
 
 import (
 	"context"
-	"mime/multipart"
-	"net/http"
-	"newsfeed/common/utils"
+	"newsfeed/common/logger"
 	"newsfeed/ent"
 	fileUploader "newsfeed/modules/attachment/file_uploader"
-	"newsfeed/modules/attachment/repository"
-	"strings"
+	"newsfeed/modules/attachment/models"
+	"newsfeed/modules/attachment/pb"
 
 	"github.com/gin-gonic/gin"
 )
 
 type AttachmentUploaderServiceInterface interface {
-	UploadSingleAttachment(fileHeader *multipart.FileHeader, name string) (*ent.Attachment, error)
+	UploadAttachments(attachments models.Attachments) (*ent.Attachment, error)
 	GetSingleAttachment(context *gin.Context, attachmentPath string)
-	DeleteSingleAttachment(attachmentPath string) error
+	Delete(attachmentPath string) error
 }
 
 type AttachmentUploaderService struct {
-	uploader             fileUploader.FileUploaderInterface
-	attachmentRepository repository.AttachmentRepositoryInterface
+	uploader   fileUploader.FileUploaderInterface
+	gRPCClient pb.AttachmentServiceClient
 }
 
-func NewAttachmentService(attachmentRepository repository.AttachmentRepositoryInterface, uploader fileUploader.FileUploaderInterface) AttachmentUploaderServiceInterface {
+func NewAttachmentService(gRPCClient pb.AttachmentServiceClient, uploader fileUploader.FileUploaderInterface) AttachmentUploaderServiceInterface {
 	service := &AttachmentUploaderService{
-		uploader:             uploader,
-		attachmentRepository: attachmentRepository,
+		uploader:   uploader,
+		gRPCClient: gRPCClient,
 	}
 	return service
 }
 
-func (aus AttachmentUploaderService) DeleteSingleAttachment(attachmentPath string) error {
-	return aus.uploader.DeleteSingleFile(attachmentPath)
+func (aus AttachmentUploaderService) Delete(attachmentPath string) error {
+	return nil
 }
 
 func (aus AttachmentUploaderService) GetSingleAttachment(context *gin.Context, attachmentPath string) {
-	attachment, err := aus.attachmentRepository.GetByPath(context, attachmentPath)
-	if err != nil {
-		context.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "fileNotFound", "status": "error"})
-		return
-	}
-	aus.uploader.GetSingleFile(context, attachmentPath, attachment.Name)
+	
 }
 
-func (aus AttachmentUploaderService) UploadSingleAttachment(fileHeader *multipart.FileHeader, name string) (*ent.Attachment, error) {
-	parentDirectory := "attachments"
-	attachmentPath := parentDirectory + "/" + utils.GetFileHashName(fileHeader.Filename)
+func (aus AttachmentUploaderService) UploadAttachments(attachments models.Attachments) (*ent.Attachment, error) {
+	requestAttachments := &pb.RequestAttachments{}
+	for _, attachment := range attachments.Attachment {
+		tmpAttachment := pb.RequestAttachment{Name: attachment.Name, Path: attachment.Path}
+		requestAttachments.Attachments = append(requestAttachments.Attachments, &tmpAttachment)
+	}
 
-	err := aus.uploader.UploadSingleFile(parentDirectory, attachmentPath, fileHeader)
+	_, err := aus.gRPCClient.CreateMultiple(context.Background(), requestAttachments)
 	if err != nil {
+		logger.LogError(err)
 		return nil, err
 	}
 
-	pathSegregation := strings.Split(attachmentPath, "/")
-	fileName := pathSegregation[1]
-
-	if strings.Compare(name, "") == 0 {
-		nameWithExtension := strings.Split(fileName, ".")
-		nameWithoutExtension := nameWithExtension[0]
-		name = nameWithoutExtension
-	}
-
-	attachment, err := aus.attachmentRepository.Store(context.Background(), attachmentPath, name)
-
-	// Attachment Path modification
-	attachment.Path = "/attachment/single/" + fileName
-	if strings.Compare(attachment.Name, "") == 0 {
-		attachment.Name = fileName
-	}
-
-	return attachment, nil
+	return nil, nil
 }

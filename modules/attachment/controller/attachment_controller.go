@@ -6,9 +6,11 @@ import (
 	"newsfeed/common/logger"
 	"newsfeed/errors"
 
+	"newsfeed/modules/attachment/models"
 	attachmentService "newsfeed/modules/attachment/service"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 )
 
 type AttachmentController struct {
@@ -20,25 +22,22 @@ func NewAttachmentController(service attachmentService.AttachmentUploaderService
 	return &AttachmentController{service: service}
 }
 
-func (c AttachmentController) UploadSingleFile(context *gin.Context) {
-	file, err := context.FormFile("attachment")
-	if err != nil {
-		context.AbortWithStatusJSON(c.GetStatusCode(err), gin.H{"error": c.ErrorTraverse(err)})
-		logger.LogInfo(err)
+func (c AttachmentController) UploadAttachments(context *gin.Context) {
+	attachments := models.Attachments{}
+	if err := context.ShouldBindBodyWith(&attachments, binding.JSON); err != nil {
+		logger.LogError("JSON body binding error ", err)
+		context.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalidJSONBody"})
 		return
 	}
 
-	fileName := context.Query("name")
-
-	attachmentPath, upErr := c.service.UploadSingleAttachment(file, fileName)
-
+	_, upErr := c.service.UploadAttachments(attachments)
 	if upErr != nil {
-		context.AbortWithStatusJSON(c.GetStatusCode(err), gin.H{"error": c.ErrorTraverse(err)})
+		context.AbortWithStatusJSON(c.GetStatusCode(upErr), gin.H{"error": c.ErrorTraverse(upErr)})
 		logger.LogInfo(upErr)
 		return
 	}
 
-	context.JSON(http.StatusCreated, gin.H{"message": "Comment", "attachment": attachmentPath})
+	context.JSON(http.StatusCreated, gin.H{"message": "attachments created"})
 }
 
 func (c AttachmentController) GetSingleFile(context *gin.Context) {
@@ -46,9 +45,9 @@ func (c AttachmentController) GetSingleFile(context *gin.Context) {
 	c.service.GetSingleAttachment(context, path)
 }
 
-func (c AttachmentController) DeleteSingleFile(context *gin.Context) {
+func (c AttachmentController) Delete(context *gin.Context) {
 	path := context.Query("attachment_path")
-	err := c.service.DeleteSingleAttachment(path)
+	err := c.service.Delete(path)
 	if err != nil {
 		context.AbortWithStatusJSON(c.GetStatusCode(err), gin.H{"error": c.ErrorTraverse(err)})
 		logger.LogInfo(err)
